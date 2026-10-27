@@ -1,0 +1,93 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS
+          - os: windows-latest
+            name: Windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (macOS, Universal arm64 + x86_64)
+        if: runner.os == 'macOS'
+        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Ad-hoc signieren (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for b in VST3/Finisher.vst3 AU/Finisher.component Standalone/Finisher.app; do
+            codesign --force --deep -s - "build/Finisher_artefacts/Release/$b"
+          done
+
+      - name: AU validieren (auval)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/Finisher_artefacts/Release/AU/Finisher.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx Fnsh Jcit
+
+      - name: Paket (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist/Finisher
+          cp -R build/Finisher_artefacts/Release/VST3/Finisher.vst3 dist/Finisher/
+          cp -R build/Finisher_artefacts/Release/AU/Finisher.component dist/Finisher/
+          cp -R build/Finisher_artefacts/Release/Standalone/Finisher.app dist/Finisher/
+          cp build/Release/finisher-cli dist/Finisher/ || true
+          cp README.md dist/Finisher/
+          cd dist && ditto -c -k --keepParent Finisher Finisher-macOS.zip
+
+      - name: Paket (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/Finisher | Out-Null
+          Copy-Item -Recurse build/Finisher_artefacts/Release/VST3/Finisher.vst3 dist/Finisher/
+          Copy-Item build/Finisher_artefacts/Release/Standalone/Finisher.exe dist/Finisher/
+          Copy-Item build/Release/finisher-cli.exe dist/Finisher/ -ErrorAction SilentlyContinue
+          Copy-Item README.md dist/Finisher/
+          Compress-Archive -Path dist/Finisher -DestinationPath dist/Finisher-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Finisher-${{ matrix.name }}
+          path: dist/Finisher-${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
