@@ -34,6 +34,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
+      - name: DSP-Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Ad-hoc signieren (macOS)
         if: runner.os == 'macOS'
         run: |

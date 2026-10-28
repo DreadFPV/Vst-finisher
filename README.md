@@ -3,19 +3,32 @@
 Mastering-Strip als **ein** Plugin (VST3 / AU / Standalone) für Cubase, Ableton & Co.
 Ziel: Tracks club- und DJ-tauglich fertig machen – mit Zielwerten für LUFS, True Peak und Loudness Range.
 
-**Kette:** Input → EQ → Mono-Bass / Breite → Kompressor → True-Peak-Limiter → Output-Trim
+**Kette:** Input → Dyn-EQ → Stereo → Transient → Kompressor → Multiband → Drive → Saturation → Clipper → True-Peak-Limiter → Output-Trim
+
+Oben eine **Modulleiste**: Kachel anklicken öffnet die Seite des Moduls, Schalter in der Kachel = Ein/Aus, darunter der Live-Wert (GR, Korrelation …). Verlauf und Loudness-Meter bleiben immer sichtbar.
 
 ## Module
 
 | Modul | Funktion |
 |---|---|
-| **EQ** | Low-Cut 24 dB/Okt, Low-Shelf, 2× Glocke (Freq/Gain/Q), High-Shelf, Frequenzgang-Anzeige |
-| **Mono-Bass** | Alles unter der eingestellten Frequenz mono (Linkwitz-Riley 24 dB/Okt, phasenneutral summiert), Stereobreite darüber 0–200 % |
-| **Kompressor** | Stereo-gelinkt, Threshold, Ratio, Attack, Release, Soft-Knee, Makeup, Parallel-Mix, GR-Anzeige |
-| **Limiter** | Lookahead 1.5 ms, **True-Peak-Erkennung 4× oversampled**, Drive, Ceiling (dBTP), Release, GR-Anzeige |
-| **Messung** | Nach ITU-R BS.1770-4 / EBU R128: Momentary, Short-Term, Integrated, LRA, True Peak Max |
-| **Verlauf** | Waveform In (grau) / Out (grün), Short-Term-LUFS-Kurve, Ziel-Linie, Limiter-GR (rot) |
-| **Ziele** | Ziel-LUFS, Ziel-True-Peak, Ziel-LRA → „Ziele anwenden“ stellt Drive, Ceiling und Kompressor ein |
+| **Dyn-EQ** | Low-Cut 12/24/48 dB/Okt, Low-Shelf, 2× Glocke, High-Shelf. Jedes Band: **Stereo / Mid / Side** und optional **dynamisch** (Threshold + Range: minus = absenken wenn laut, plus = anheben). Kurve zeigt eingestellt + aktuell. |
+| **Stereo** | Bass mono unter X Hz, Breite für Mitten und Höhen getrennt (3 Bänder, phasenneutral), **Korrelationsmesser** |
+| **Transient** | Attack / Sustain ±12 dB, pegelunabhängig |
+| **Kompressor** | Stereo-gelinkt, Threshold, Ratio, Attack, Release, Knee, Makeup, Parallel-Mix |
+| **Multiband** | 3 Bänder (LR4-Weichen, phasenneutral), je Threshold/Ratio/Attack/Release/Gain, Solo, Bypass, GR-Anzeige |
+| **Saturation** | Tape / Tube / Soft, Drive, Ton (dunkel–hell), Mix, Auto-Gain, **4× oversampled** |
+| **Clipper** | Kappt Spitzen vor dem Limiter (Schwelle relativ zum Ceiling, Weichheit), **4× oversampled** |
+| **Limiter** | Lookahead 1.5 ms, **True-Peak-Erkennung 4×**, Drive, Ceiling (dBTP), Release, Output-Trim |
+| **Messung** | ITU-R BS.1770-4 / EBU R128: Momentary, Short-Term, Integrated, LRA, True Peak Max, Korrelation |
+| **Verlauf** | Waveform In/Out, Short-Term-LUFS-Kurve, Ziel-Linie, Limiter-GR |
+| **Ziele** | Ziel-LUFS / True Peak / LRA → „Ziele anwenden“ |
+
+**Abhören (oben rechts):**
+- **A/B Bypass** – Original, automatisch auf gleiche Lautheit gebracht (ehrlicher Vergleich, lauter klingt nicht automatisch besser)
+- **Delta** – nur das hören, was der Finisher verändert
+- **Mono** – Club-Check
+
+Latenz: 136 Samples @ 48 kHz (2.8 ms), konstant – wird automatisch an die DAW gemeldet.
 
 ## Ziel-Automatik – so geht's
 
@@ -33,7 +46,7 @@ Ampelfarben: grün = im Ziel, gelb = knapp daneben, rot = deutlich daneben / Tru
 
 Jeder Push baut automatisch (GitHub → **Actions** → letzter Lauf → *Artifacts*):
 `Finisher-macOS.zip` (Universal, Apple Silicon + Intel) und `Finisher-Windows.zip`.
-Bei einem Tag `v*` (z. B. `v0.1.0`) wird zusätzlich ein Release erstellt.
+Bei einem Tag `v*` (z. B. `v0.2.0`) wird zusätzlich ein Release erstellt.
 
 **macOS**
 - `Finisher.vst3` → `~/Library/Audio/Plug-Ins/VST3/`
@@ -71,9 +84,11 @@ finisher-cli track.wav master.wav --drive 3 --ceiling -1      # manuell
 
 ## Tests (Entwicklung)
 
+`ctest -C Release` startet den DSP-Selbsttest (Null-Tests der Kette, A/B, Delta, phasenneutrale Weichen, Mono-Bass, Clipper, Dyn-EQ, True Peak bei verschiedenen Blockgrößen) – läuft auch in GitHub Actions.
+
 `-DFINISHER_BUILD_HOSTTEST=ON` baut zwei Tools:
 - `finisher-hosttest` – lädt das VST3, prüft Latenz, Verarbeitung, variable Blockgrößen, State-Roundtrip
-- `finisher-snapshot` – verarbeitet ein WAV und rendert die GUI als PNG
+- `finisher-snapshot` – verarbeitet ein WAV und rendert alle Modulseiten als PNG
 
 Messgenauigkeit geprüft gegen `ffmpeg ebur128` (Integrated ±0.1 LU, LRA ±0.1 LU, True Peak ±0.05 dB).
 

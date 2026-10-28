@@ -2,39 +2,90 @@
 
 namespace fin
 {
-/** Alle Einstellungen der Signalkette. Reihenfolge der Kette:
-    Input -> EQ -> Mono-Bass/Width -> Kompressor -> Limiter (Drive + True-Peak-Ceiling) -> Output-Trim */
+/** Kanal-Routing für EQ-Bänder. */
+enum ChannelMode { kStereo = 0, kMid = 1, kSide = 2 };
+
+/** EQ-Band mit optionaler Dynamik: Bei range != 0 reagiert das Band auf den Pegel im Band.
+    range < 0: absenken, wenn es laut wird (z. B. Resonanzen zähmen)
+    range > 0: anheben, wenn es laut wird (z. B. Kick-Attack betonen) */
+struct EqBand
+{
+    float freq = 1000.0f, gain = 0.0f, q = 1.0f;
+    int   mode = kStereo;
+    float thresh = -20.0f, range = 0.0f;
+};
+
+struct MbBand
+{
+    float thresh = -18.0f, ratio = 2.0f, attack = 20.0f, release = 150.0f, gain = 0.0f;
+    bool  solo = false, bypass = false;
+};
+
+/** Alle Einstellungen der Signalkette. Feste Reihenfolge:
+    Input -> Dyn-EQ -> Stereo -> Transient -> Kompressor -> Multiband -> Drive -> [4x: Saturation -> Clipper]
+    -> True-Peak-Limiter -> Output-Trim -> Monitoring (A/B, Delta, Mono) */
 struct Settings
 {
     // Input
     float inGainDb = 0.0f;
 
-    // EQ
-    bool  eqOn   = true;
-    bool  hpOn   = true;
-    float hpFreq = 25.0f;                       // Low-Cut 24 dB/Okt
-    float lsFreq = 80.0f,   lsGain = 0.0f;      // Low-Shelf
-    float p1Freq = 250.0f,  p1Gain = 0.0f, p1Q = 1.0f;
-    float p2Freq = 2500.0f, p2Gain = 0.0f, p2Q = 1.0f;
-    float hsFreq = 10000.0f, hsGain = 0.0f;     // High-Shelf
+    // Dynamischer EQ
+    bool  eqOn    = true;
+    bool  hpOn    = true;
+    float hpFreq  = 25.0f;
+    int   hpSlope = 1;                          // 0 = 12, 1 = 24, 2 = 48 dB/Okt
+    EqBand ls { 80.0f,    0.0f, 0.71f, kStereo, -20.0f, 0.0f };
+    EqBand p1 { 250.0f,   0.0f, 1.0f,  kStereo, -20.0f, 0.0f };
+    EqBand p2 { 2500.0f,  0.0f, 1.0f,  kStereo, -20.0f, 0.0f };
+    EqBand hs { 10000.0f, 0.0f, 0.71f, kStereo, -20.0f, 0.0f };
+    float eqAttack = 10.0f, eqRelease = 120.0f;
 
-    // Mono-Bass / Stereo
-    bool  monoOn   = true;
-    float monoFreq = 120.0f;                    // darunter mono (Linkwitz-Riley 24 dB/Okt)
-    float width    = 100.0f;                    // Stereobreite oberhalb, in %
+    // Stereo (3 Bänder)
+    bool  monoOn    = true;
+    float monoFreq  = 120.0f;                   // darunter mono
+    float width     = 100.0f;                   // Breite Mitten (%)
+    float widthHigh = 100.0f;                   // Breite Höhen (%)
+    float widthXover = 4000.0f;                 // Übergang Mitten/Höhen
+
+    // Transient-Shaper
+    bool  trOn = false;
+    float trAttack = 0.0f, trSustain = 0.0f;    // dB, -12 ... +12
 
     // Kompressor
     bool  compOn   = false;
     float thresh   = -12.0f, ratio = 2.0f, attack = 30.0f, release = 150.0f;
     float knee     = 6.0f,   makeup = 0.0f, mix = 100.0f;
 
+    // Multiband-Kompressor
+    bool  mbOn = false;
+    float mbX1 = 150.0f, mbX2 = 3000.0f;
+    MbBand mb[3] { { -18.0f, 2.0f, 30.0f, 200.0f, 0.0f },
+                   { -18.0f, 2.0f, 15.0f, 120.0f, 0.0f },
+                   { -18.0f, 2.0f, 5.0f,  80.0f,  0.0f } };
+
+    // Saturation (4x oversampled)
+    bool  satOn = false;
+    int   satModel = 0;                         // 0 Tape, 1 Tube, 2 Soft
+    float satDrive = 6.0f, satTone = 0.0f, satMix = 100.0f;
+    bool  satAuto = true;
+
+    // Clipper (4x oversampled), Schwelle relativ zum Limiter-Ceiling
+    bool  clipOn = false;
+    float clipThresh = 1.0f;                    // dB über dem Ceiling
+    float clipSoft = 30.0f;                     // %
+
     // Limiter
     bool  limOn      = true;
-    float drive      = 0.0f;                    // Gain in den Limiter
+    float drive      = 0.0f;                    // Gain in Clipper + Limiter
     float ceiling    = -1.0f;                   // dBTP
     float limRelease = 60.0f;                   // ms
 
     // Output
-    float outGainDb = 0.0f;                     // nur absenken (-12..0), damit das Ceiling hält
+    float outGainDb = 0.0f;                     // nur absenken (-12..0)
+
+    // Monitoring (nur Abhören, Messung bleibt auf dem bearbeiteten Signal)
+    bool abBypass = false;                      // lautheitsgleicher Bypass
+    bool delta = false;                         // nur die Veränderung hören
+    bool monoListen = false;
 };
 } // namespace fin
