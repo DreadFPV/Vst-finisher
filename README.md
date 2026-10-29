@@ -30,6 +30,30 @@ Oben eine **Modulleiste**: Kachel anklicken öffnet die Seite des Moduls, Schalt
 
 Latenz: 136 Samples @ 48 kHz (2.8 ms), konstant – wird automatisch an die DAW gemeldet.
 
+## Presets
+
+Oben links: **◀ Preset ▶** und **Speichern…**
+
+| Werks-Preset | Ziel | Charakter |
+|---|---|---|
+| Neutral (Standard) | – | Low-Cut, Mono-Bass, Limiter −1 dBTP |
+| Psy / Goa Club −9 | −9 LUFS, LRA 6 | Multiband hält den Bass, Leads dynamisch gezähmt, Höhen breiter, Tape, Clipper |
+| Full-On / Hi-Tech −8 | −8 LUFS, LRA 5 | wie Psy, mehr Punch (Transient), härterer Clipper |
+| Dark / Forest −9 | −9 LUFS, LRA 6 | dunkler: Tube mit Ton −20, weniger Mitten-Matsch |
+| DnB / Neurofunk −8 | −8 LUFS, LRA 5 | Mono bis 150 Hz, Reese-Bass im Griff, Snare-Punch, Tube |
+| Brazil Bounce / Bass −8 | −8 LUFS, LRA 6 | Low-Shelf +1 dB, Punch, Soft-Saturation |
+| Reggae / Chill −12 | −12 LUFS, LRA 8 | sanft, warm, kein Clipper |
+| Streaming −14 | −14 LUFS, LRA 8 | Spotify/YouTube, minimal |
+| Nur Messen (alles aus) | – | nur Meter, Signal unverändert |
+
+Presets sind **Startpunkte**: Preset laden → Track komplett abspielen → **Ziele anwenden** (2–3×). Getestet: alle Presets erreichen ihr LUFS-Ziel auf ±0.3 LU, True Peak hält.
+
+**Eigene Presets** werden hier gespeichert (A/B, Delta, Mono werden nicht mitgespeichert):
+- macOS: `~/Library/JustCreateit/Finisher/Presets/`
+- Windows: `%APPDATA%\JustCreateit\Finisher\Presets\`
+
+Der Preset-Name wird im DAW-Projekt mitgespeichert.
+
 ## Ziel-Automatik – so geht's
 
 1. Zielwerte einstellen (z. B. Club: **−9 LUFS**, **−1 dBTP**, **LRA 6–8 LU**).
@@ -89,6 +113,7 @@ finisher-cli track.wav master.wav --drive 3 --ceiling -1      # manuell
 `-DFINISHER_BUILD_HOSTTEST=ON` baut zwei Tools:
 - `finisher-hosttest` – lädt das VST3, prüft Latenz, Verarbeitung, variable Blockgrößen, State-Roundtrip
 - `finisher-snapshot` – verarbeitet ein WAV und rendert alle Modulseiten als PNG
+- `finisher-presettest` – lädt alle Werks-Presets, rechnet die Ziel-Automatik durch, prüft LUFS/True Peak und das Speichern eigener Presets
 
 Messgenauigkeit geprüft gegen `ffmpeg ebur128` (Integrated ±0.1 LU, LRA ±0.1 LU, True Peak ±0.05 dB).
 

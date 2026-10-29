@@ -128,6 +128,18 @@ public:
     juce::String applyTargets();
     void resetMeters() { engine.requestMeterReset(); }
 
+    //==============================================================================
+    // Presets (Werk + eigene). Monitoring (A/B, Delta, Mono) wird beim Laden nicht verändert.
+    static int numFactoryPresets();
+    static juce::String factoryPresetName (int index);
+    /** Gibt die Anzahl unbekannter Parameter-IDs zurück (0 = alles ok). */
+    int loadFactoryPreset (int index);
+    static juce::File userPresetFolder();
+    juce::Array<juce::File> userPresets() const;
+    bool saveUserPreset (const juce::String& name);
+    bool loadUserPreset (const juce::File& file);
+    juce::String currentPresetName() const { return apvts.state.getProperty ("presetName", "Neutral (Standard)").toString(); }
+
     juce::AudioProcessorValueTreeState apvts;
     fin::Engine engine;
     std::atomic<double> currentSampleRate { 48000.0 };
@@ -137,6 +149,10 @@ private:
     float get (const juce::String& id) const { return apvts.getRawParameterValue (id)->load(); }
     bool on (const juce::String& id) const { return get (id) > 0.5f; }
     int choice (const juce::String& id) const { return juce::roundToInt (get (id)); }
+
+    void resetToDefaults();
+    void setPresetName (const juce::String& n) { apvts.state.setProperty ("presetName", n, nullptr); }
+    static bool isMonitoringParam (const juce::String& id);
 
     juce::AudioBuffer<float> monoScratch;
 

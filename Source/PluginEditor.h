@@ -43,6 +43,15 @@ private:
     ui::BarMeter trMeter { "TRANSIENT-GAIN", -12.0f, 12.0f, "dB" };
     juce::Component stereoRight, transRight, compRight, clipRight, limRight;
 
+    // Presets
+    void refreshPresetList();
+    void loadPresetFromBox();
+    void stepPreset (int dir);
+    void savePresetDialog();
+    juce::ComboBox presetBox;
+    juce::TextButton presetPrev { "<" }, presetNext { ">" }, presetSave;
+    juce::Array<juce::File> userPresetFiles;
+
     // Kopfzeile
     ui::ToggleTextButton abBtn, deltaBtn, monoBtn;
     juce::Label matchLabel;

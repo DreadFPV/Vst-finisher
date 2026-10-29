@@ -96,6 +96,17 @@ FinisherAudioProcessorEditor::FinisherAudioProcessorEditor (FinisherAudioProcess
     status.setJustificationType (juce::Justification::topLeft);
     status.setText (utf8 ("Ziele einstellen → Track komplett abspielen → „Ziele anwenden“ → nochmal prüfen."), juce::dontSendNotification);
 
+    // Presets
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBox, &presetPrev, &presetNext, &presetSave })
+        addAndMakeVisible (c);
+    presetSave.setButtonText (utf8 ("Speichern…"));
+    presetBox.setTextWhenNothingSelected ("Preset");
+    presetBox.onChange = [this] { loadPresetFromBox(); };
+    presetPrev.onClick = [this] { stepPreset (-1); };
+    presetNext.onClick = [this] { stepPreset (+1); };
+    presetSave.onClick = [this] { savePresetDialog(); };
+    refreshPresetList();
+
     selectModule (kLim);
     setSize (kW, kH);
     startTimerHz (30);
@@ -301,8 +312,7 @@ void FinisherAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FINISHER", 18, 8, 160, 34, juce::Justification::centredLeft);
     g.setColour (col::textDim);
     g.setFont (ui::font (12.0f));
-    g.drawText (utf8 ("Mastering-Strip · Just DereadBeats / justcreateit.ch · v" JucePlugin_VersionString),
-                150, 8, 420, 34, juce::Justification::centredLeft);
+    g.drawText ("v" JucePlugin_VersionString, 136, 8, 50, 34, juce::Justification::centredLeft);
 
     // Signalfluss-Pfeile zwischen den Kacheln
     if (tiles[0] != nullptr)
@@ -334,6 +344,15 @@ void FinisherAudioProcessorEditor::resized()
     head.removeFromRight (6);
     abBtn.setBounds (head.removeFromRight (100).reduced (0, 5));
     matchLabel.setBounds (head.removeFromRight (190));
+    head.removeFromLeft (190);
+    auto pb = head.reduced (0, 5);
+    presetPrev.setBounds (pb.removeFromLeft (28));
+    pb.removeFromLeft (4);
+    presetBox.setBounds (pb.removeFromLeft (300));
+    pb.removeFromLeft (4);
+    presetNext.setBounds (pb.removeFromLeft (28));
+    pb.removeFromLeft (8);
+    presetSave.setBounds (pb.removeFromLeft (100));
     area.removeFromTop (6);
 
     // Modulleiste
@@ -385,6 +404,68 @@ void FinisherAudioProcessorEditor::resized()
     applyBtn.setBounds (row4.reduced (2, 0));
     b.removeFromTop (4);
     status.setBounds (b);
+}
+
+//==============================================================================
+void FinisherAudioProcessorEditor::refreshPresetList()
+{
+    presetBox.clear (juce::dontSendNotification);
+    presetBox.addSectionHeading ("WERK-PRESETS");
+    for (int i = 0; i < FinisherAudioProcessor::numFactoryPresets(); ++i)
+        presetBox.addItem (FinisherAudioProcessor::factoryPresetName (i), i + 1);
+    userPresetFiles = proc.userPresets();
+    if (! userPresetFiles.isEmpty())
+    {
+        presetBox.addSeparator();
+        presetBox.addSectionHeading ("EIGENE PRESETS");
+        for (int j = 0; j < userPresetFiles.size(); ++j)
+            presetBox.addItem (userPresetFiles[j].getFileNameWithoutExtension(), 1000 + j);
+    }
+    // aktuellen Namen anzeigen
+    const auto current = proc.currentPresetName();
+    for (int k = 0; k < presetBox.getNumItems(); ++k)
+        if (presetBox.getItemText (k) == current) { presetBox.setSelectedItemIndex (k, juce::dontSendNotification); return; }
+    presetBox.setText (current, juce::dontSendNotification);
+}
+
+void FinisherAudioProcessorEditor::loadPresetFromBox()
+{
+    const int id = presetBox.getSelectedId();
+    if (id <= 0) return;
+    if (id < 1000) proc.loadFactoryPreset (id - 1);
+    else if (! proc.loadUserPreset (userPresetFiles[id - 1000])) { status.setText (utf8 ("Preset konnte nicht geladen werden."), juce::dontSendNotification); return; }
+    status.setText (utf8 ("Preset „") + presetBox.getText() + utf8 ("“ geladen. Track komplett abspielen → „Ziele anwenden“."),
+                    juce::dontSendNotification);
+}
+
+void FinisherAudioProcessorEditor::stepPreset (int dir)
+{
+    const int n = presetBox.getNumItems();
+    if (n == 0) return;
+    int idx = presetBox.getSelectedItemIndex();
+    if (idx < 0) idx = dir > 0 ? -1 : 0;
+    idx = (idx + dir + n) % n;
+    presetBox.setSelectedItemIndex (idx, juce::sendNotificationSync);
+}
+
+void FinisherAudioProcessorEditor::savePresetDialog()
+{
+    auto* aw = new juce::AlertWindow (utf8 ("Preset speichern"), utf8 ("Name für das eigene Preset:"), juce::MessageBoxIconType::NoIcon, this);
+    aw->addTextEditor ("name", proc.currentPresetName());
+    aw->addButton ("Speichern", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Abbrechen", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([this, aw] (int result)
+    {
+        if (result != 1) return;
+        const auto name = aw->getTextEditorContents ("name").trim();
+        if (proc.saveUserPreset (name))
+        {
+            refreshPresetList();
+            status.setText (utf8 ("Preset „") + name + utf8 ("“ gespeichert."), juce::dontSendNotification);
+        }
+        else
+            status.setText (utf8 ("Speichern fehlgeschlagen (Name leer oder Ordner nicht beschreibbar)."), juce::dontSendNotification);
+    }), true);
 }
 
 //==============================================================================
@@ -444,6 +525,9 @@ void FinisherAudioProcessorEditor::timerCallback()
     enable ({ satDrive, satTone, satMix }, s.satOn);
     enable ({ clipThr, clipSoft }, s.clipOn);
     enable ({ mbX1, mbX2 }, s.mbOn);
+
+    if (! presetBox.isPopupActive() && presetBox.getText() != proc.currentPresetName())
+        refreshPresetList();
 
     if (selected == kEq) eqCurve.refresh();
     history.repaint();

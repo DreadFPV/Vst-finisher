@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Finisher VERSION 0.2.0 LANGUAGES C CXX)
+project(Finisher VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,5 +93,17 @@ if(FINISHER_BUILD_HOSTTEST)
         JucePlugin_Name="Finisher" JucePlugin_VersionString="${PROJECT_VERSION}"
         JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(finisher-snapshot PRIVATE
+        juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+endif()
+
+if(FINISHER_BUILD_HOSTTEST)
+    juce_add_console_app(finisher-presettest PRODUCT_NAME "finisher-presettest")
+    target_sources(finisher-presettest PRIVATE
+        tools/preset_test.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/gui/Components.cpp)
+    target_include_directories(finisher-presettest PRIVATE Source)
+    target_compile_definitions(finisher-presettest PRIVATE
+        JucePlugin_Name="Finisher" JucePlugin_VersionString="${PROJECT_VERSION}"
+        JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(finisher-presettest PRIVATE
         juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
 endif()

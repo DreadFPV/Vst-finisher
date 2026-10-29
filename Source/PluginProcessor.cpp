@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 
 using APVTS = juce::AudioProcessorValueTreeState;
 
@@ -283,6 +284,96 @@ juce::String FinisherAudioProcessor::applyTargets()
 
     engine.requestMeterReset();
     return res.message;
+}
+
+//==============================================================================
+int FinisherAudioProcessor::numFactoryPresets() { return (int) presets::factory().size(); }
+
+juce::String FinisherAudioProcessor::factoryPresetName (int index)
+{
+    const auto& f = presets::factory();
+    return juce::isPositiveAndBelow (index, (int) f.size()) ? juce::String::fromUTF8 (f[(size_t) index].name) : juce::String();
+}
+
+bool FinisherAudioProcessor::isMonitoringParam (const juce::String& id)
+{
+    return id == ParamIDs::abBypass || id == ParamIDs::delta || id == ParamIDs::monoLis;
+}
+
+void FinisherAudioProcessor::resetToDefaults()
+{
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (! isMonitoringParam (rp->getParameterID()))
+            {
+                rp->beginChangeGesture();
+                rp->setValueNotifyingHost (rp->getDefaultValue());
+                rp->endChangeGesture();
+            }
+}
+
+int FinisherAudioProcessor::loadFactoryPreset (int index)
+{
+    const auto& f = presets::factory();
+    if (! juce::isPositiveAndBelow (index, (int) f.size())) return -1;
+    resetToDefaults();
+    int unknown = 0;
+    for (const auto& [id, value] : f[(size_t) index].values)
+    {
+        if (apvts.getParameter (id) == nullptr) { ++unknown; jassertfalse; continue; }
+        setParam (id, value);
+    }
+    setPresetName (factoryPresetName (index));
+    engine.requestMeterReset();
+    return unknown;
+}
+
+juce::File FinisherAudioProcessor::userPresetFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("JustCreateit").getChildFile ("Finisher").getChildFile ("Presets");
+}
+
+juce::Array<juce::File> FinisherAudioProcessor::userPresets() const
+{
+    auto files = userPresetFolder().findChildFiles (juce::File::findFiles, false, "*.fpreset");
+    files.sort();
+    return files;
+}
+
+bool FinisherAudioProcessor::saveUserPreset (const juce::String& name)
+{
+    const auto clean = juce::File::createLegalFileName (name.trim());
+    if (clean.isEmpty()) return false;
+    auto folder = userPresetFolder();
+    if (! folder.createDirectory()) return false;
+
+    setPresetName (name.trim());
+    auto state = apvts.copyState();
+    for (int i = state.getNumChildren(); --i >= 0;)        // Monitoring nicht mitspeichern
+        if (isMonitoringParam (state.getChild (i).getProperty ("id").toString()))
+            state.removeChild (i, nullptr);
+    if (auto xml = state.createXml())
+        return xml->writeTo (folder.getChildFile (clean + ".fpreset"));
+    return false;
+}
+
+bool FinisherAudioProcessor::loadUserPreset (const juce::File& file)
+{
+    auto xml = juce::XmlDocument::parse (file);
+    if (xml == nullptr || ! xml->hasTagName (apvts.state.getType())) return false;
+    const auto tree = juce::ValueTree::fromXml (*xml);
+    resetToDefaults();
+    for (const auto& child : tree)
+    {
+        const auto id = child.getProperty ("id").toString();
+        if (id.isEmpty() || isMonitoringParam (id)) continue;
+        if (apvts.getParameter (id) != nullptr)
+            setParam (id, (float) child.getProperty ("value"));
+    }
+    setPresetName (tree.getProperty ("presetName", file.getFileNameWithoutExtension()).toString());
+    engine.requestMeterReset();
+    return true;
 }
 
 //==============================================================================
