@@ -53,32 +53,34 @@ struct Settings
 
     // Kompressor
     bool  compOn   = false;
-    float thresh   = -12.0f, ratio = 2.0f, attack = 30.0f, release = 150.0f;
+    float thresh   = -6.0f,  ratio = 2.0f, attack = 30.0f, release = 150.0f;
     float knee     = 6.0f,   makeup = 0.0f, mix = 100.0f;
 
     // Multiband-Kompressor
     bool  mbOn = false;
     float mbX1 = 150.0f, mbX2 = 3000.0f;
-    MbBand mb[3] { { -18.0f, 2.0f, 30.0f, 200.0f, 0.0f },
-                   { -18.0f, 2.0f, 15.0f, 120.0f, 0.0f },
-                   { -18.0f, 2.0f, 5.0f,  80.0f,  0.0f } };
+    // Schwellen bewusst hoch (sanft) – "Ziele anwenden" kalibriert sie auf den Track
+    MbBand mb[3] { { -8.0f, 2.0f, 30.0f, 200.0f, 0.0f },
+                   { -8.0f, 1.5f, 15.0f, 120.0f, 0.0f },
+                   { -8.0f, 1.8f, 5.0f,  80.0f,  0.0f } };
 
     // Saturation (4x oversampled)
     bool  satOn = false;
     int   satModel = 0;                         // 0 Tape, 1 Tube, 2 Soft
-    float satDrive = 6.0f, satTone = 0.0f, satMix = 100.0f;
+    float satDrive = 3.0f, satTone = 0.0f, satMix = 100.0f;
     bool  satAuto = true;
+    bool  satBassFree = true;                   // Bass unter 150 Hz nicht sättigen
 
     // Clipper (4x oversampled), Schwelle relativ zum Limiter-Ceiling
     bool  clipOn = false;
-    float clipThresh = 1.0f;                    // dB über dem Ceiling
-    float clipSoft = 30.0f;                     // %
+    float clipThresh = 2.0f;                    // dB über dem Ceiling
+    float clipSoft = 50.0f;                     // %
 
     // Limiter
     bool  limOn      = true;
     float drive      = 0.0f;                    // Gain in Clipper + Limiter
     float ceiling    = -1.0f;                   // dBTP
-    float limRelease = 60.0f;                   // ms
+    float limRelease = 120.0f;                  // ms (zu schnell = Verzerrung im Bass)
 
     // Output
     float outGainDb = 0.0f;                     // nur absenken (-12..0)

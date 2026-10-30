@@ -118,6 +118,7 @@ APVTS::ParameterLayout FinisherAudioProcessor::createLayout()
     addFloat (l, satTone,  "Saturation Tone", { -100.0f, 100.0f, 1.0f }, d.satTone, fmtTone);
     addFloat (l, satMix,   "Saturation Mix", { 0.0f, 100.0f, 1.0f }, d.satMix, fmtPct);
     addBool  (l, satAuto,  "Saturation Auto-Gain", d.satAuto);
+    addBool  (l, satBass,  "Saturation Bass Clean", d.satBassFree);
 
     addBool  (l, clipOn,   "Clipper On", d.clipOn);
     addFloat (l, clipThr,  "Clipper Threshold", { -3.0f, 6.0f, 0.1f }, d.clipThresh, fmtSigned);
@@ -231,7 +232,7 @@ fin::Settings FinisherAudioProcessor::readSettings() const
     }
 
     s.satOn = on (satOn); s.satModel = choice (satModel); s.satDrive = get (satDrive);
-    s.satTone = get (satTone); s.satMix = get (satMix); s.satAuto = on (satAuto);
+    s.satTone = get (satTone); s.satMix = get (satMix); s.satAuto = on (satAuto); s.satBassFree = on (satBass);
 
     s.clipOn = on (clipOn); s.clipThresh = get (clipThr); s.clipSoft = get (clipSoft);
 
@@ -278,6 +279,11 @@ juce::String FinisherAudioProcessor::applyTargets()
     setParam (knee, s.knee);
     setParam (makeup, s.makeup);
     setParam (mix, s.mix);
+    for (int b = 0; b < 3; ++b)
+        setParam (mbParam (b, "Thr"), s.mb[b].thresh);
+    setParam (clipOn, s.clipOn ? 1.0f : 0.0f);
+    setParam (clipThr, s.clipThresh);
+    setParam (clipSoft, s.clipSoft);
     setParam (limOn, s.limOn ? 1.0f : 0.0f);
     setParam (drive, s.drive);
     setParam (ceiling, s.ceiling);

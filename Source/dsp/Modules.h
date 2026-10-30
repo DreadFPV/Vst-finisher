@@ -64,6 +64,72 @@ private:
 };
 
 //==============================================================================
+/** Pegelstatistik für die Kalibrierung: 10-ms-Spitzen (Vollband + 3 Bänder) als Histogramm.
+    Daraus wird z. B. das 90. Perzentil bestimmt -> Kompressor-Schwellen passend zum Track. */
+class LevelAnalyzer
+{
+public:
+    static constexpr int kStreams = 4;          // 0 = Vollband, 1..3 = Low/Mid/High
+    static constexpr double kLo = -80.0, kRes = 0.5;
+    static constexpr int kBins = 184;           // -80 ... +12 dB
+
+    void prepare (double sampleRate) { win = std::max (1, (int) std::lround (sampleRate * 0.01)); xo.prepare (sampleRate); reset(); }
+    void reset()
+    {
+        for (auto& h : hist) std::fill (std::begin (h), std::end (h), 0.0);
+        std::fill (std::begin (pk), std::end (pk), 0.0f);
+        pos = 0; xo.reset();
+    }
+
+    void process (const float* L, const float* R, int n, float x1, float x2) noexcept
+    {
+        xo.setFreqs (x1, x2);
+        for (int i = 0; i < n; ++i)
+        {
+            float lL, mL, hL, lR, mR, hR;
+            xo.split (L[i], 0, lL, mL, hL);
+            xo.split (R[i], 1, lR, mR, hR);
+            pk[0] = std::max (pk[0], std::max (std::abs (L[i]), std::abs (R[i])));
+            pk[1] = std::max (pk[1], std::max (std::abs (lL), std::abs (lR)));
+            pk[2] = std::max (pk[2], std::max (std::abs (mL), std::abs (mR)));
+            pk[3] = std::max (pk[3], std::max (std::abs (hL), std::abs (hR)));
+            if (++pos >= win)
+            {
+                for (int k = 0; k < kStreams; ++k)
+                {
+                    const double db = gainToDb (pk[k]);
+                    if (db > -60.0)    // Stille ignorieren
+                        hist[k][std::clamp ((int) ((db - kLo) / kRes), 0, kBins - 1)] += 1.0;
+                    pk[k] = 0.0f;
+                }
+                pos = 0;
+            }
+        }
+    }
+
+    /** Perzentil (0..1) der 10-ms-Spitzen in dBFS, oder -200 wenn nichts gemessen. */
+    double percentile (int stream, double q) const
+    {
+        double total = 0.0;
+        for (double c : hist[stream]) total += c;
+        if (total < 50.0) return -200.0;
+        double cum = 0.0;
+        for (int b = 0; b < kBins; ++b)
+        {
+            cum += hist[stream][b];
+            if (cum >= q * total) return kLo + (b + 0.5) * kRes;
+        }
+        return kLo + kBins * kRes;
+    }
+
+private:
+    Crossover3 xo;
+    double hist[kStreams][kBins] {};
+    float pk[kStreams] {};
+    int win = 480, pos = 0;
+};
+
+//==============================================================================
 /** Dynamischer EQ: Low-Cut (12/24/48 dB), Low-Shelf, 2 Glocken, High-Shelf.
     Jedes Band: Stereo / Mid / Side, optional dynamisch (Threshold + Range). */
 class DynamicEq
@@ -390,8 +456,16 @@ private:
 class Saturation
 {
 public:
-    void prepare (double osRate) { fs = osRate; envC = coefFromMs (300.0f, fs); dcC = std::exp (-2.0f * (float) kPi * 8.0f / (float) fs); tone = 1e9f; reset(); }
-    void reset() { pIn = pOut = 1e-6f; dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f; tiltLo.reset(); tiltHi.reset(); }
+    static constexpr double kBassFreq = 150.0;   // darunter bleibt der Bass sauber (Bass-Schutz)
+
+    void prepare (double osRate)
+    {
+        fs = osRate; envC = coefFromMs (300.0f, fs); dcC = std::exp (-2.0f * (float) kPi * 8.0f / (float) fs); tone = 1e9f;
+        bassLp.set (BiquadCoeffs::lowpass (fs, kBassFreq, 0.70710678));
+        bassHp.set (BiquadCoeffs::highpass (fs, kBassFreq, 0.70710678));
+        reset();
+    }
+    void reset() { pIn = pOut = 1e-6f; dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f; tiltLo.reset(); tiltHi.reset(); bassLp.reset(); bassHp.reset(); }
 
     void process (float* L, float* R, int n, const Settings& s) noexcept
     {
@@ -407,7 +481,9 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            float x[2] = { L[i], R[i] }, y[2];
+            float x[2] = { L[i], R[i] }, y[2], low[2] = { 0.0f, 0.0f };
+            if (s.satBassFree)   // Bass (LR4) abtrennen, nur darüber sättigen -> Kick/Sub bleiben sauber
+                for (int c = 0; c < 2; ++c) { low[c] = bassLp.process (x[c], c); x[c] = bassHp.process (x[c], c); }
             for (int c = 0; c < 2; ++c)
             {
                 const float v = x[c] * g;
@@ -429,8 +505,8 @@ public:
             pIn  = envC * pIn  + (1.0f - envC) * (x[0] * x[0] + x[1] * x[1]);
             pOut = envC * pOut + (1.0f - envC) * (y[0] * y[0] + y[1] * y[1]);
             const float comp = s.satAuto ? std::clamp (std::sqrt (pIn / std::max (pOut, 1e-12f)), 0.1f, 4.0f) : 1.0f;
-            L[i] = x[0] * (1.0f - mix) + y[0] * comp * mix;
-            R[i] = x[1] * (1.0f - mix) + y[1] * comp * mix;
+            L[i] = low[0] + x[0] * (1.0f - mix) + y[0] * comp * mix;
+            R[i] = low[1] + x[1] * (1.0f - mix) + y[1] * comp * mix;
         }
     }
 
@@ -440,6 +516,7 @@ private:
     float pIn = 1e-6f, pOut = 1e-6f;
     float dcX[2] {}, dcY[2] {};
     Biquad tiltLo, tiltHi;
+    Lr4 bassLp, bassHp;
 };
 
 /** Clipper (läuft oversampled) mit weichem Knie. Gibt maximale Reduktion in dB zurück. */
@@ -471,7 +548,7 @@ public:
     void prepare (double sampleRate)
     {
         fs = sampleRate;
-        look   = std::max (4, (int) std::lround (0.0015 * fs));         // 1.5 ms Lookahead
+        look   = std::max (4, (int) std::lround (0.003 * fs));          // 3 ms Lookahead (weicher, weniger Verzerrung bei Kick/Sub)
         window = look + 4;                                                // Reserve für Detektor-Jitter
         delay  = (look - 1) + TruePeakDetector::kDelay + 2;
         delayL.assign ((size_t) delay + 1, 0.0f);

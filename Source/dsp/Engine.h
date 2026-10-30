@@ -27,7 +27,28 @@ struct Measurement
     double lra = 0.0;                               // Output, LU
     double truePeak = -200.0;                       // Output, dBTP (max)
     double compInIntegrated = LoudnessMeter::kSilence;
+    /** 90. Perzentil der 10-ms-Spitzen am Kompressor-Eingang: [0] Vollband, [1..3] Multiband-Bänder (dBFS). */
+    double levelP90[4] { -200.0, -200.0, -200.0, -200.0 };
+    double limGrP95 = 0.0;    // Limiter-Gain-Reduction (dB, positiv), 95. Perzentil über den Track
+    double clipGrP95 = 0.0;   // Clipper-Reduktion (dB, positiv), 95. Perzentil
     double seconds = 0.0;
+};
+
+/** Histogramm für Gain-Reduction-Werte (0 ... 24 dB, 0.25-dB-Schritte). */
+struct GrStats
+{
+    static constexpr int kBins = 96;
+    double h[kBins] {};
+    double total = 0.0;
+    void clear() { std::fill (std::begin (h), std::end (h), 0.0); total = 0.0; }
+    void add (float grDb) { h[std::clamp ((int) (grDb / 0.25f), 0, kBins - 1)] += 1.0; total += 1.0; }
+    double percentile (double q) const
+    {
+        if (total < 1.0) return 0.0;
+        double cum = 0.0;
+        for (int b = 0; b < kBins; ++b) { cum += h[b]; if (cum >= q * total) return b * 0.25; }
+        return kBins * 0.25;
+    }
 };
 
 struct Targets
@@ -60,6 +81,7 @@ public:
         const int maxSeg = stepLen;                       // process() teilt in Segmente <= stepLen
         eq.prepare (fs); stereo.prepare (fs); trans.prepare (fs); comp.prepare (fs);
         mbComp.prepare (fs, maxSeg);
+        levels.prepare (fs);
         os.prepare (maxSeg); sat.prepare (fs * 4.0);
         limiter.prepare (fs);
         dryDelay.prepare (latency());
@@ -121,6 +143,8 @@ public:
     std::atomic<float> clipGr { 0.0f }, trGain { 0.0f };
     std::atomic<float> mbGr[3] { { 0.0f }, { 0.0f }, { 0.0f } };
     std::atomic<float> eqDyn[DynamicEq::kBands] { { 0.0f }, { 0.0f }, { 0.0f }, { 0.0f } };
+    std::atomic<float> levelP90[4] { { -200.0f }, { -200.0f }, { -200.0f }, { -200.0f } };
+    std::atomic<float> limGrP95 { 0.0f }, clipGrP95 { 0.0f };
 
     /** Verlauf (Single-Producer). historyCount = Gesamtanzahl geschriebener Punkte. */
     std::vector<HistoryPoint> history;
@@ -131,6 +155,8 @@ public:
         Measurement m;
         m.integrated = integrated.load(); m.lra = lra.load(); m.truePeak = truePeakMax.load();
         m.compInIntegrated = compInIntegrated.load(); m.seconds = measuredSeconds.load();
+        for (int k = 0; k < 4; ++k) m.levelP90[k] = levelP90[k].load();
+        m.limGrP95 = limGrP95.load(); m.clipGrP95 = clipGrP95.load();
         return m;
     }
 
@@ -155,29 +181,48 @@ public:
         s.limOn = true;
         s.ceiling = std::clamp (t.truePeak, -6.0f, 0.0f);
 
-        // 2) LRA -> Kompressor
+        // 2) Dynamik auf den Track kalibrieren: Schwellen aus den gemessenen Pegeln (90. Perzentil),
+        //    so dass Kompressor und Multiband nur moderat regeln. LRA steuert die Menge der Kompression.
+        auto grAt   = [] (double level, double thr, double ratio) { return std::max (0.0, (level - thr) * (1.0 - 1.0 / std::max (1.01, ratio))); };
+        auto thrFor = [] (double level, double gr, double ratio)  { return level - gr / (1.0 - 1.0 / std::max (1.2, ratio)); };
         const double excess = m.lra - t.lra;
-        if (excess > 0.5)
+
+        if (m.levelP90[0] > -60.0)
         {
-            if (! cur.compOn)
+            double compGr = cur.compOn ? grAt (m.levelP90[0], cur.thresh, cur.ratio) : 0.0;
+            if (compGr < 0.3) compGr = 1.5;                     // Startwert: sanfter Glue
+            if (excess > 0.5)
             {
+                compGr += std::min (3.0, excess * 0.6);
                 s.compOn = true;
-                s.attack = 30.0f; s.release = 200.0f; s.knee = 6.0f; s.mix = 100.0f; s.makeup = 0.0f;
-                s.thresh = (float) std::clamp (m.compInIntegrated + 4.0 - excess, -40.0, 0.0);
-                s.ratio  = (float) std::clamp (1.5 + excess * 0.4, 1.5, 6.0);
+                msg += "LRA zu hoch → etwas mehr Kompression. ";
             }
-            else
+            else if (excess < -1.0 && cur.compOn)
             {
-                s.thresh = (float) std::clamp ((double) cur.thresh - excess * 0.75, -40.0, 0.0);
-                s.ratio  = (float) std::clamp ((double) cur.ratio * (1.0 + excess * 0.1), 1.0, 10.0);
+                compGr += excess * 0.4;
+                msg += "LRA zu niedrig → weniger Kompression. ";
             }
-            msg += "LRA zu hoch → mehr Kompression. ";
+            compGr = std::clamp (compGr, 0.5, 6.0);
+
+            if (s.compOn)
+            {
+                if (! cur.compOn) { s.attack = 30.0f; s.release = 200.0f; s.knee = 6.0f; s.mix = 100.0f; s.makeup = 0.0f; s.ratio = 2.0f; }
+                s.thresh = (float) std::clamp (thrFor (m.levelP90[0], compGr, s.ratio), -40.0, 0.0);
+            }
+            if (s.mbOn)
+            {
+                const double grTarget[3] = { 2.5, 2.0, 2.0 };   // am 90. Perzentil -> Anzeige typ. 1-2 dB
+                for (int b = 0; b < 3; ++b)
+                    if (m.levelP90[b + 1] > -60.0 && s.mb[b].ratio > 1.05f)
+                        s.mb[b].thresh = (float) std::clamp (thrFor (m.levelP90[b + 1], grTarget[b], s.mb[b].ratio), -40.0, 0.0);
+                msg += "Multiband auf den Track eingestellt (max. 1.5–2 dB pro Band). ";
+            }
         }
-        else if (excess < -1.0 && cur.compOn)
+        else if (excess > 0.5 && ! cur.compOn)
         {
-            s.thresh = (float) std::clamp ((double) cur.thresh - excess * 0.75, -40.0, 0.0);
-            s.ratio  = (float) std::clamp ((double) cur.ratio * (1.0 + excess * 0.1), 1.0, 10.0);
-            msg += "LRA zu niedrig → weniger Kompression. ";
+            s.compOn = true;
+            s.attack = 30.0f; s.release = 200.0f; s.knee = 6.0f; s.mix = 100.0f; s.makeup = 0.0f; s.ratio = 2.0f;
+            s.thresh = (float) std::clamp (m.compInIntegrated + 4.0 - excess, -40.0, 0.0);
         }
 
         // 3) LUFS -> Drive (Kompressor-Änderung grob kompensieren)
@@ -193,8 +238,28 @@ public:
             s.inGainDb = (float) std::clamp ((double) cur.inGainDb + cur.drive + delta, -24.0, 24.0);
             s.drive = 0.0f;
         }
-        if (s.drive > 12.0f)
-            msg += "Achtung: viel Drive (" + std::to_string ((int) s.drive) + " dB) – Limiter arbeitet hart. ";
+        // 4) Spitzen verteilen: Limiter max. ~3 dB, darüber nimmt ein weicher Clipper die kurzen Spitzen
+        //    (Kick/Snare). Ein Limiter mit viel GR duckt den ganzen Mix inkl. Bass -> kraftlos/verzerrt.
+        const double projectedLim = m.limGrP95 + std::max (0.0, (double) s.drive - cur.drive) * 0.8;
+        if (projectedLim > 3.0)
+        {
+            if (! cur.clipOn)
+            {
+                s.clipOn = true; s.clipThresh = 2.5f; s.clipSoft = 50.0f;
+                msg += "Limiter würde zu viel arbeiten → weicher Clipper übernimmt die Spitzen. ";
+            }
+            else if (cur.clipThresh > 1.5f)
+            {
+                s.clipThresh = std::max (1.5f, cur.clipThresh - 0.5f);
+                msg += "Clipper etwas früher, damit der Limiter entlastet wird. ";
+            }
+        }
+        if (m.clipGrP95 > 3.5 || (projectedLim > 4.5 && s.clipOn && s.clipThresh <= 1.5f))
+        {
+            const double realistic = std::round ((t.lufs - std::max (1.0, m.clipGrP95 - 3.0) - 1.0) * 2.0) / 2.0;
+            msg += "Achtung: Ziel ist für diesen Mix sehr laut (Spitzen werden stark gekappt). Empfehlung: Ziel "
+                 + std::to_string ((int) std::floor (realistic)) + " LUFS oder weniger. ";
+        }
 
         msg += "Angewendet. Track nochmal komplett abspielen und prüfen (2–3 Durchgänge).";
         r.message = msg;
@@ -205,9 +270,11 @@ public:
 private:
     void resetMeters()
     {
-        outMeter.reset(); compInMeter.reset(); dryMeter.reset();
+        outMeter.reset(); compInMeter.reset(); dryMeter.reset(); levels.reset();
+        for (auto& v : levelP90) v.store (-200.0f);
         sLR = sLL = sRR = 0.0;
-        histPos = 0; segInPeak = segOutPeak = 0.0f; segLimGr = 0.0f;
+        histPos = 0; segInPeak = segOutPeak = 0.0f; segLimGr = 0.0f; segClipGr = 0.0f;
+        limStats.clear(); clipStats.clear(); limGrP95 = 0.0f; clipGrP95 = 0.0f;
         tpMax = -200.0f; tpNow = -200.0f;
         tpDet.reset();
         historyCount.store (0);
@@ -235,6 +302,7 @@ private:
         if (s.trOn) trBlock = absMax (trBlock, trans.process (L, R, n, s.trAttack, s.trSustain));
 
         compInMeter.process (L, R, n);
+        levels.process (L, R, n, s.mbX1, s.mbX2);
         if (s.compOn) compGrBlock = std::min (compGrBlock, comp.process (L, R, n, Compressor::fromSettings (s)));
         if (s.mbOn)
         {
@@ -247,7 +315,12 @@ private:
         ramp (L, R, n, curDrive, dbToGain (s.drive));
         os.up (L, R, n);
         if (s.satOn) sat.process (os.hiL(), os.hiR(), 4 * n, s);
-        if (s.clipOn) clipGrBlock = std::min (clipGrBlock, processClipper (os.hiL(), os.hiR(), 4 * n, s.ceiling + s.clipThresh, s.clipSoft));
+        if (s.clipOn)
+        {
+            const float cg = processClipper (os.hiL(), os.hiR(), 4 * n, s.ceiling + s.clipThresh, s.clipSoft);
+            clipGrBlock = std::min (clipGrBlock, cg);
+            segClipGr = std::min (segClipGr, cg);
+        }
         os.down (L, R, n);
 
         const float lg = limiter.process (L, R, n, s.limOn, s.ceiling, s.limRelease);
@@ -312,7 +385,16 @@ private:
         p.shortTerm = (float) outMeter.shortTerm(); p.momentary = (float) outMeter.momentary();
         p.limGrDb = segLimGr;
         historyCount.store (c + 1, std::memory_order_release);
-        segInPeak = segOutPeak = 0.0f; segLimGr = 0.0f;
+        // GR-Verteilung nur in lauten Abschnitten sammeln (Stille/Intro verfälscht sonst)
+        if (outMeter.momentary() > -40.0)
+        {
+            limStats.add (-segLimGr); clipStats.add (-segClipGr);
+            limGrP95.store ((float) limStats.percentile (0.95));
+            clipGrP95.store ((float) clipStats.percentile (0.95));
+        }
+        segInPeak = segOutPeak = 0.0f; segLimGr = 0.0f; segClipGr = 0.0f;
+
+        for (int k = 0; k < 4; ++k) levelP90[k].store ((float) levels.percentile (k, 0.90));
 
         // Pegelabgleich für A/B: Short-Term Output minus Short-Term Original (geglättet)
         const double so = outMeter.shortTerm(), sd = dryMeter.shortTerm();
@@ -353,6 +435,7 @@ private:
     DelayLine dryDelay;
     std::vector<float> dryL, dryR;
     LoudnessMeter outMeter, compInMeter, dryMeter;
+    LevelAnalyzer levels;
     double sLR = 0.0, sLL = 0.0, sRR = 0.0;
     float corrC = 0.0f;
     float curMatch = 1.0f, matchDbSmooth = 0.0f;
@@ -363,7 +446,8 @@ private:
     float compGrBlock = 0.0f, limGrBlock = 0.0f;
     float tpMax = -200.0f, tpNow = -200.0f;
     int stepLen = 4800, histPos = 0;
-    float segInPeak = 0.0f, segOutPeak = 0.0f, segLimGr = 0.0f;
+    float segInPeak = 0.0f, segOutPeak = 0.0f, segLimGr = 0.0f, segClipGr = 0.0f;
+    GrStats limStats, clipStats;
     std::atomic<bool> resetRequested { false };
 };
 } // namespace fin

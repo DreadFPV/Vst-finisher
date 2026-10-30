@@ -18,7 +18,7 @@ Oben eine **Modulleiste**: Kachel anklicken öffnet die Seite des Moduls, Schalt
 | **Multiband** | 3 Bänder (LR4-Weichen, phasenneutral), je Threshold/Ratio/Attack/Release/Gain, Solo, Bypass, GR-Anzeige |
 | **Saturation** | Tape / Tube / Soft, Drive, Ton (dunkel–hell), Mix, Auto-Gain, **4× oversampled** |
 | **Clipper** | Kappt Spitzen vor dem Limiter (Schwelle relativ zum Ceiling, Weichheit), **4× oversampled** |
-| **Limiter** | Lookahead 1.5 ms, **True-Peak-Erkennung 4×**, Drive, Ceiling (dBTP), Release, Output-Trim |
+| **Limiter** | Lookahead 3 ms, Release-Standard 120 ms, **True-Peak-Erkennung 4×**, Drive, Ceiling (dBTP), Release, Output-Trim |
 | **Messung** | ITU-R BS.1770-4 / EBU R128: Momentary, Short-Term, Integrated, LRA, True Peak Max, Korrelation |
 | **Verlauf** | Waveform In/Out, Short-Term-LUFS-Kurve, Ziel-Linie, Limiter-GR |
 | **Ziele** | Ziel-LUFS / True Peak / LRA → „Ziele anwenden“ |
@@ -28,7 +28,7 @@ Oben eine **Modulleiste**: Kachel anklicken öffnet die Seite des Moduls, Schalt
 - **Delta** – nur das hören, was der Finisher verändert
 - **Mono** – Club-Check
 
-Latenz: 136 Samples @ 48 kHz (2.8 ms), konstant – wird automatisch an die DAW gemeldet.
+Latenz: 208 Samples @ 48 kHz (4.3 ms), konstant – wird automatisch an die DAW gemeldet.
 
 ## Presets
 
@@ -46,7 +46,13 @@ Oben links: **◀ Preset ▶** und **Speichern…**
 | Streaming −14 | −14 LUFS, LRA 8 | Spotify/YouTube, minimal |
 | Nur Messen (alles aus) | – | nur Meter, Signal unverändert |
 
-Presets sind **Startpunkte**: Preset laden → Track komplett abspielen → **Ziele anwenden** (2–3×). Getestet: alle Presets erreichen ihr LUFS-Ziel auf ±0.3 LU, True Peak hält.
+Presets sind **Startpunkte**: Preset laden → Track komplett abspielen → **Ziele anwenden** (2–3×). Getestet: alle Presets erreichen ihr LUFS-Ziel auf ±0.5 LU, True Peak hält.
+
+**Was „Ziele anwenden“ einstellt (seit v0.4):**
+- **Kompressor + Multiband kalibrieren sich auf den Track:** gemessen wird das 90. Perzentil der Pegel (gesamt und pro Band), die Schwellen werden so gesetzt, dass nur ca. 1.5–2 dB geregelt wird – unabhängig davon, wie laut der Mix reinkommt.
+- **Spitzen werden verteilt:** der Limiter soll max. ~3 dB arbeiten. Braucht es mehr, übernimmt ein weicher Clipper (4× oversampled) die kurzen Kick/Snare-Spitzen – das duckt den Bass nicht und klingt sauberer als ein überfahrener Limiter.
+- **Warnung**, wenn das LUFS-Ziel für den Mix zu laut ist (mit Empfehlung).
+- Saturation lässt standardmäßig den Bass unter 150 Hz sauber („Bass sauber“).
 
 **Eigene Presets** werden hier gespeichert (A/B, Delta, Mono werden nicht mitgespeichert):
 - macOS: `~/Library/JustCreateit/Finisher/Presets/`

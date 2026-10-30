@@ -156,6 +156,9 @@ int main (int argc, char** argv)
         else if (a == "--drive")   s.drive = next();
         else if (a == "--ceiling") s.ceiling = next();
         else if (a == "--mono")    { const float f = next(); s.monoOn = f > 0.0f; if (f > 0.0f) s.monoFreq = f; }
+        else if (a == "--clip")    { s.clipOn = true; s.clipThresh = next(); }
+        else if (a == "--soft")    s.clipSoft = next();
+        else if (a == "--rel")     s.limRelease = next();
         else if (a == "--full")    { s.trOn = s.compOn = s.mbOn = s.satOn = s.clipOn = true; s.p1.range = -3.0f; }
         else if (a[0] != '-')      outPath = a;
     }

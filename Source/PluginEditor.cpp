@@ -220,7 +220,7 @@ void FinisherAudioProcessorEditor::buildPages()
         compRight.addAndMakeVisible (compGr);
         pg->addAndMakeVisible (compRight);
         pg->setRight (&compRight, 50);
-        pg->setHint (utf8 ("Glue-Kompressor für den ganzen Mix. Die Ziel-Automatik stellt ihn bei zu hoher LRA ein."));
+        pg->setHint (utf8 ("Glue-Kompressor. „Ziele anwenden“ setzt die Schwelle passend zum Track (sanft, ca. 1.5 dB) und mehr bei zu hoher LRA."));
         pg->setColumns (std::move (cols));
         pages[kComp] = std::move (pg);
     }
@@ -241,7 +241,7 @@ void FinisherAudioProcessorEditor::buildPages()
             cols.push_back (std::move (bc));
         }
         for (auto& cc : cols) { for (auto& row : cc.rows) for (auto* x : row) pg->addAndMakeVisible (x); if (cc.headerItem) pg->addAndMakeVisible (cc.headerItem); }
-        pg->setHint (utf8 ("Bänder getrennt komprimieren, z. B. Bass festhalten ohne die Höhen zu pumpen. Solo = Band einzeln anhören."));
+        pg->setHint (utf8 ("„Ziele anwenden“ misst jedes Band und setzt die Schwellen so, dass nur 1.5–2 dB geregelt wird. Solo = Band einzeln anhören."));
         pg->setColumns (std::move (cols));
         pages[kMb] = std::move (pg);
     }
@@ -251,10 +251,10 @@ void FinisherAudioProcessorEditor::buildPages()
         auto pg = std::make_unique<ui::Page> ("SATURATION", col::sat);
         const auto c = col::sat;
         std::vector<Col> cols {
-            Col { "MODELL", { { choice (satModel, "TYP") }, { toggle (satAuto, "Auto-Gain", c) } }, 1.2f },
+            Col { "MODELL", { { choice (satModel, "TYP") }, { toggle (satAuto, "Auto-Gain", c), toggle (satBass, "Bass sauber", c) } }, 1.6f },
             Col { utf8 ("SÄTTIGUNG"), { { knob (satDrive, "DRIVE", c), knob (satTone, "TON", c), knob (satMix, "MIX", c) } }, 3.0f } };
         for (auto& cc : cols) for (auto& row : cc.rows) for (auto* x : row) pg->addAndMakeVisible (x);
-        pg->setHint (utf8 ("Tape = rund, Tube = warm (gerade Obertöne), Soft = sanft. 4x oversampled. Auto-Gain hält die Lautheit gleich."));
+        pg->setHint (utf8 ("Tape = rund, Tube = warm, Soft = sanft. „Bass sauber“: unter 150 Hz keine Sättigung (Kick/Sub bleiben klar). 4x oversampled."));
         pg->setColumns (std::move (cols));
         pages[kSat] = std::move (pg);
     }

@@ -69,6 +69,7 @@ namespace ParamIDs
     inline constexpr const char* satTone  = "satTone";
     inline constexpr const char* satMix   = "satMix";
     inline constexpr const char* satAuto  = "satAuto";
+    inline constexpr const char* satBass  = "satBassFree";
     // Clipper
     inline constexpr const char* clipOn   = "clipOn";
     inline constexpr const char* clipThr  = "clipThr";

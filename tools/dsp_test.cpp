@@ -173,6 +173,31 @@ int main()
         check (finite && e.truePeakMax.load() <= -0.95f, name, e.truePeakMax.load(), "dBTP");
     }
 
+    // 10) Kalibrierung: Multiband/Kompressor auf leises und lautes Material -> moderate Regelung
+    for (float level : { 0.05f, 0.35f })
+    {
+        Settings s; s.compOn = true; s.mbOn = true;
+        std::vector<float> l, r;
+        makeNoise (l, r, (size_t) (fs * 12), fs, level);
+        Engine e;
+        run (s, l, r, nullptr, fs, &e);
+        Targets t; t.lufs = -10.0f; t.truePeak = -1.0f; t.lra = 6.0f;
+        auto res = Engine::computeTargets (s, e.measurement(), t);
+        Engine e2;
+        e2.setSettings (res.settings); e2.prepare (fs, 512); e2.setSettings (res.settings);
+        float mbMax = 0.0f;
+        std::vector<float> bl (512), br (512);
+        for (size_t pos = 0; pos + 512 <= l.size(); pos += 512)
+        {
+            std::copy (l.begin() + (long) pos, l.begin() + (long) pos + 512, bl.begin());
+            std::copy (r.begin() + (long) pos, r.begin() + (long) pos + 512, br.begin());
+            e2.process (bl.data(), br.data(), 512);
+            if (pos > (size_t) fs) for (auto& g : e2.mbGr) mbMax = std::min (mbMax, g.load());
+        }
+        char name[80]; std::snprintf (name, sizeof name, "Kalibrierung Pegel %.2f: Multiband-GR aktiv, aber moderat", level);
+        check (mbMax > -4.0f && mbMax < -0.15f, name, mbMax, "dB");
+    }
+
     std::printf ("\n%s (%d Fehler)\n", failures == 0 ? "ALLE DSP-TESTS OK" : "DSP-TESTS FEHLGESCHLAGEN", failures);
     return failures == 0 ? 0 : 1;
 }

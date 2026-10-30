@@ -5,15 +5,30 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../Source/PluginProcessor.h"
 
+struct Diag { float comp = 0, mb[3] {}, clip = 0, lim = 0; double grSum[2] {}; long n = 0; };
+static Diag diag;
+
+static juce::AudioBuffer<float>* capture = nullptr;   // optional: Ausgabe des letzten Durchgangs mitschneiden
+
 static float pass (FinisherAudioProcessor& proc, juce::AudioFormatReader& reader, juce::int64 start, juce::int64 len)
 {
+    diag = {};
     proc.resetMeters();
+    if (capture) capture->setSize (2, (int) len, false, true);
     juce::AudioBuffer<float> buf (2, 512);
     juce::MidiBuffer midi;
     for (juce::int64 pos = 0; pos < len; pos += 512)
     {
         reader.read (&buf, 0, 512, start + pos, true, true);
         proc.processBlock (buf, midi);
+        if (capture)
+            for (int c = 0; c < 2; ++c)
+                capture->copyFrom (c, (int) pos, buf, c, 0, (int) juce::jmin<juce::int64> (512, len - pos));
+        auto& e = proc.engine;
+        diag.comp = std::min (diag.comp, e.compGr.load()); diag.clip = std::min (diag.clip, e.clipGr.load());
+        diag.lim = std::min (diag.lim, e.limGr.load());
+        for (int b = 0; b < 3; ++b) diag.mb[b] = std::min (diag.mb[b], e.mbGr[b].load());
+        diag.grSum[0] += e.compGr.load(); diag.grSum[1] += e.mbGr[0].load() + e.mbGr[1].load() + e.mbGr[2].load(); ++diag.n;
     }
     return proc.engine.integrated.load();
 }
@@ -36,9 +51,14 @@ int main (int argc, char** argv)
     proc.prepareToPlay (fs, 512);
 
     std::printf ("%-34s %8s %8s %6s %8s  %s\n", "Preset", "Ziel", "I", "LRA", "TP", "Status");
+    const int only = std::getenv ("FINISHER_ONLY") ? std::atoi (std::getenv ("FINISHER_ONLY")) : -1;
     for (int i = 0; i < FinisherAudioProcessor::numFactoryPresets(); ++i)
     {
+        if (only >= 0 && i != only) continue;
         const int unknown = proc.loadFactoryPreset (i);
+        if (auto* off = std::getenv ("FINISHER_OFF"))   // z. B. FINISHER_OFF=satOn,mbOn
+            for (auto& id : juce::StringArray::fromTokens (off, ",", ""))
+                if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (0.0f);
         if (unknown != 0) { std::printf ("FAIL: %d unbekannte Parameter in Preset %d\n", unknown, i); ++failures; }
         const auto t = proc.readTargets();
         const bool measureOnly = proc.factoryPresetName (i).startsWith ("Nur Messen") || i == 0;
@@ -50,12 +70,27 @@ int main (int argc, char** argv)
                 proc.applyTargets();
                 pass (proc, *reader, start, len);
             }
+        if (auto* dir = std::getenv ("FINISHER_WRITE"))
+        {
+            juce::AudioBuffer<float> out;
+            capture = &out;
+            pass (proc, *reader, start, len);
+            capture = nullptr;
+            juce::File f (juce::String (dir) + "/preset_" + juce::String (i) + juce::String (std::getenv ("FINISHER_TAG") ? std::getenv ("FINISHER_TAG") : "") + ".wav");
+            f.deleteFile();
+            juce::WavAudioFormat wav;
+            std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), fs, 2, 32, {}, 0));
+            if (w) w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
+        }
         const float I = proc.engine.integrated.load(), lra = proc.engine.lra.load(), tp = proc.engine.truePeakMax.load();
         const auto s = proc.readSettings();
         bool ok = true;
         if (! measureOnly && std::abs (I - t.lufs) > 0.6f) ok = false;
         if (s.limOn && tp > t.truePeak + 0.05f) ok = false;
         if (! ok) ++failures;
+        if (std::getenv ("FINISHER_DIAG"))
+            std::printf ("   GR max: Comp %.1f | MB %.1f/%.1f/%.1f | Clip %.1f | Lim %.1f   GR avg: Comp %.1f, MB-Summe %.1f\n",
+                         diag.comp, diag.mb[0], diag.mb[1], diag.mb[2], diag.clip, diag.lim, diag.grSum[0] / std::max (1L, diag.n), diag.grSum[1] / std::max (1L, diag.n));
         std::printf ("%-34s %8.1f %8.1f %6.1f %8.2f  %s (Drive %.1f dB)\n", proc.factoryPresetName (i).toRawUTF8(),
                      measureOnly ? 0.0f : t.lufs, I, lra, tp, ok ? "OK" : "FAIL", s.drive);
     }
